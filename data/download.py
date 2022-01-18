@@ -7,6 +7,7 @@ import subprocess
 import os
 import tqdm
 import argparse
+from multiprocessing.pool import ThreadPool
 
 public_url = "https://storage.googleapis.com/objectron"
 categories = [
@@ -20,6 +21,29 @@ categories = [
 # "laptop",
 # "shoe"
 ]
+
+
+def download_file(video_id):
+
+    video_filename = public_url + "/videos/" + video_id + "/video.MOV"
+    metadata_filename = public_url + "/videos/" + video_id + "/geometry.pbdata"
+    annotation_filename = public_url + "/annotations/" + video_id + ".pbdata"
+
+    # If the file has been downloaded, skip it
+    if os.path.exists(f"data/{c}/{video_id.replace('/', '_')}.pbdata"):
+        return
+
+    # video.content contains the video file.
+    video = requests.get(video_filename)
+    metadata = requests.get(metadata_filename)
+    annotation = requests.get(annotation_filename)
+    file = open(f"data/{c}/{video_id.replace('/', '_')}.MOV", "wb")
+    file.write(video.content)
+    file = open(f"data/{c}/{video_id.replace('/', '_')}_geometry.pbdata", "wb")
+    file.write(metadata.content)
+    file = open(f"data/{c}/{video_id.replace('/', '_')}.pbdata", "wb")
+    file.write(annotation.content)
+    file.close()
 
 
 if __name__ == "__main__":
@@ -46,24 +70,6 @@ if __name__ == "__main__":
         video_ids = requests.get(blob_path).text
         video_ids = video_ids.split('\n')
 
-        for i in tqdm.tqdm(range(len(video_ids)-1)):
-            
-            video_filename = public_url + "/videos/" + video_ids[i] + "/video.MOV"
-            metadata_filename = public_url + "/videos/" + video_ids[i] + "/geometry.pbdata"
-            annotation_filename = public_url + "/annotations/" + video_ids[i] + ".pbdata"
-
-            # If the file has been downloaded, skip it
-            if os.path.exists(f"data/{c}/{video_ids[i].replace('/','_')}.pbdata"):
-                continue
-
-            # video.content contains the video file.
-            video = requests.get(video_filename)
-            metadata = requests.get(metadata_filename)
-            annotation = requests.get(annotation_filename)
-            file = open(f"data/{c}/{video_ids[i].replace('/','_')}.MOV", "wb")
-            file.write(video.content)
-            file = open(f"data/{c}/{video_ids[i].replace('/','_')}_geometry.pbdata", "wb")
-            file.write(metadata.content)
-            file = open(f"data/{c}/{video_ids[i].replace('/','_')}.pbdata", "wb")
-            file.write(annotation.content)
-            file.close()
+        results = ThreadPool(16).imap_unordered(download_file, video_ids)
+        for _ in tqdm.tqdm(results, total=len(video_ids)):
+            pass

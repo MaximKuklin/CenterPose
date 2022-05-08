@@ -28,6 +28,7 @@ from os.path import exists
 import glob
 from lib.opts import opts
 from lib.detectors.detector_factory import detector_factory
+from src.lib.trains.knowledge_distillation import MODELS_TRAIN
 
 
 def rotation_y_matrix(theta):
@@ -52,7 +53,6 @@ def bounding_box_rotation(points, trans):
 
 
 class ObjectPoseDataset(data.Dataset):
-    num_classes = 1
     num_joints = 8
     default_resolution = [512, 512]
 
@@ -70,6 +70,10 @@ class ObjectPoseDataset(data.Dataset):
     # Not used yet
     # mu: x,y,z,x_normalized,z_normalized
     # std: x,y,z,x_normalized,z_normalized
+
+    classes = {n: i for i, n in enumerate(MODELS_TRAIN)}
+    num_classes = len(classes)
+
     dimension_ref = {
         'bike': [[0.65320896, 1.021797894, 1.519635599, 0.6520559199, 1.506392621],
                  [0.1179380561, 0.176747817, 0.2981715678, 0.1667947895, 0.3830536275]],
@@ -111,19 +115,21 @@ class ObjectPoseDataset(data.Dataset):
                       [1, 3], [1, 5], [3, 7], [5, 7]]
 
         # Todo: need to fix the path name
-        if opt.tracking_task == True:
-            self.data_dir = os.path.join(opt.data_dir, 'outf_all')
-        else:
-            self.data_dir = os.path.join(opt.data_dir, 'outf')
+        # if opt.tracking_task == True:
+        self.data_dir = os.path.join(opt.data_dir, 'outf_all')
+        # else:
+        #     self.data_dir = os.path.join(opt.data_dir, 'outf')
 
         # # Debug only
         # self.data_dir = os.path.join(opt.data_dir, 'outf_all_test')
 
-        self.img_dir = os.path.join(self.data_dir, f"{opt.c}_{split}")
+        self.img_dirs = [os.path.join(self.data_dir, f"{c}_test") for c in MODELS_TRAIN]
 
         # Todo: take the test split as validation
-        if split == 'val' and not os.path.isdir(self.img_dir):
-            self.img_dir = os.path.join(self.data_dir, f"{opt.c}_test")
+        if split == 'val':
+            for i, img_dir in enumerate(self.img_dirs):
+                if os.path.isdir(img_dir):
+                    self.img_dirs[i] = os.path.join(self.data_dir, f"{MODELS_TRAIN[i]}_test")
 
         self.max_objs = 10
         self._data_rng = np.random.RandomState(123)
@@ -185,9 +191,9 @@ class ObjectPoseDataset(data.Dataset):
                             # Save img_path, video_id, frame_id, json_path
                             video_id = os.path.split(os.path.split(imgpath)[0])[1]
                             frame_id = os.path.splitext(os.path.basename(imgpath))[0]
-
+                            class_name = video_id.split('_')[0]
                             imgs.append((imgpath, video_id, frame_id,
-                                         imgpath.replace(ext, "json")))
+                                         imgpath.replace(ext, "json"), class_name))
 
             def explore(path):
                 if not os.path.isdir(path):
@@ -293,7 +299,7 @@ class ObjectPoseDataset(data.Dataset):
 
         # <editor-fold desc="Data initialization">
 
-        path_img, video_id, frame_id, path_json = self.images[index]
+        path_img, video_id, frame_id, path_json, class_name = self.images[index]
         img_path = path_img
         with open(path_json) as f:
             anns = json.load(f)
@@ -355,10 +361,10 @@ class ObjectPoseDataset(data.Dataset):
 
         # Parameter initialization
         # Set the rotational symmetry, will be varied according to the category
-        if self.opt.c == 'chair':
+        if class_name == 'chair':
             theta = 2 * np.pi / 4
             num_symmetry = 4
-        elif (self.opt.c == 'cup' and self.opt.mug == False) or self.opt.c == 'bottle':
+        elif (class_name == 'cup' and class_name == False) or class_name == 'bottle':
             num_symmetry = self.opt.num_symmetry
             theta = 2 * np.pi / num_symmetry
         else:
@@ -965,14 +971,14 @@ class ObjectPoseDataset(data.Dataset):
                 else:
                     num_symmetry = 1
 
-            if self.opt.c == 'cup':
+            if class_name == 'cup':
                 if self.opt.tracking_task == True and \
                         ((self.opt.mug == False and ann_pre['mug'] == True) or \
                          (self.opt.mug == True and ann_pre['mug'] == False)):
                     continue
 
             # Todo: Fixed as 0 for now
-            cls_id = 0
+            cls_id = self.classes[class_name]
             pts_ori = np.array(ann['projected_cuboid'])
 
             # Only apply rotation on gt annotation when symmetry exists
@@ -1199,7 +1205,7 @@ class ObjectPoseDataset(data.Dataset):
         if self.opt.reg_hp_offset:
             ret.update({'hp_offset': hp_offset, 'hp_ind': hp_ind, 'hp_mask': hp_mask})
         if self.opt.debug > 0 or not self.split == 'train':
-            meta = {'c': c, 's': s, 'gt_det': gt_det_pad, 'img_id': frame_id}
+            meta = {'c': c, 's': s, 'gt_det': gt_det_pad, 'img_id': frame_id, "class": class_name}
 
             ret['meta'] = meta
         # </editor-fold>

@@ -7,6 +7,8 @@ import cv2
 import os
 import math
 
+MODELS_TRAIN = ["bike", "laptop", "camera"]
+
 class Debugger(object):
     def __init__(self, ipynb=False, theme='black',
                  num_classes=-1, dataset=None, down_ratio=4):
@@ -24,8 +26,8 @@ class Debugger(object):
             self.colors = np.clip(self.colors, 0., 0.6 * 255).astype(np.uint8)
         self.dim_scale = 1
 
-        self.names = ['op']
-        self.num_class = 1
+        self.names = MODELS_TRAIN
+        self.num_class = len(self.names)
         self.num_joints = 8
         self.edges = [[2, 4], [2, 6], [6, 8], [4, 8],
                       [1, 2], [3, 4], [5, 6], [7, 8],
@@ -336,6 +338,7 @@ class Debugger(object):
         if not self.ipynb:
             for i, v in self.imgs.items():
                 cv2.imshow('{}'.format(i), v)
+                cv2.waitKey(0)
             if cv2.waitKey(0 if pause else 1) == 27:
                 import sys
                 sys.exit(0)

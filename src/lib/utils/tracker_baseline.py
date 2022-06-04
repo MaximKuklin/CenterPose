@@ -10,6 +10,8 @@ from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 from lib.utils.pnp.cuboid_pnp_shell import pnp_shell
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class Tracker_baseline(object):
     def __init__(self, opt):

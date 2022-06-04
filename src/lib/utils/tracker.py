@@ -2,6 +2,9 @@
 # This work is licensed under the NVIDIA Source Code License - Non-commercial.
 # Full text can be found in LICENSE.md
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 import numpy as np
 from sklearn.utils.linear_assignment_ import linear_assignment
 from numba import jit

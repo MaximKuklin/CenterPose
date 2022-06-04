@@ -3,6 +3,7 @@ from copy import deepcopy
 import torch
 import time
 import numpy as np
+import torch.nn as nn
 
 from progress.bar import Bar
 from .base_trainer import BaseTrainer
@@ -11,6 +12,7 @@ from lib.utils.utils import AverageMeter
 from lib.models.data_parallel import DataParallel
 from lib.models.decode import object_pose_decode
 from lib.utils.debugger import Debugger
+from src.lib.models.decode import _nms
 
 
 MODELS = {
@@ -26,7 +28,11 @@ MODELS = {
     "shoe": "models/shoe_v1_140.pth"
 }
 
-MODELS_TRAIN = ["laptop"]
+MODELS_TRAIN = [
+    "bike",
+    "laptop",
+    # "camera"
+]
 
 TEACHER_TO_MODEL = {
     "motobike": "bike",
@@ -34,6 +40,31 @@ TEACHER_TO_MODEL = {
     "camera": "camera",
     "laptop": "laptop"
 }
+
+
+class ExtraConv(nn.Module):
+    def __init__(self):
+        super(ExtraConv, self).__init__()
+        self.relu = nn.ReLU(inplace=False)
+        self.leakyrelu = nn.LeakyReLU(negative_slope=0.01, inplace=False)
+
+    def forward(self, _input):
+        output = {}
+
+        # TODO: fix for batch
+        _input = _input[0]
+
+        output['hm'] = self.leakyrelu(_input['hm'])
+        output['mask_hm'] = self.relu(_input['hm'])
+        output['wh'] = _input['wh']
+        output['hps'] = _input['hps']
+        output['reg'] = _input['reg']
+        output['hm_hp'] = self.leakyrelu(_input['hm_hp'])
+        output['mask_hm_hp'] = self.relu(_input['hm_hp'])
+        output['hp_offset'] = _input['hp_offset']
+        output['scale'] = _input['scale']
+
+        return [output]
 
 
 class ModelWithLossKD(torch.nn.Module):
@@ -49,50 +80,129 @@ class ModelWithLossKD(torch.nn.Module):
         pre_hm_hp = batch['pre_hm_hp'] if 'pre_hm_hp' in batch else None
 
         #TODO: batches
-        teacher_outputs = self.teachers[TEACHER_TO_MODEL[cls[0]]](batch['input'], pre_img, pre_hm, pre_hm_hp)
+        teacher_outputs = []
+        for inp, class_name in zip(batch['input'], batch['meta']['class']):
+            inp = inp.unsqueeze(0)
+            res = self.teachers[TEACHER_TO_MODEL[class_name]](inp, pre_img, pre_hm, pre_hm_hp)[0]
+            teacher_outputs.append(res)
+
+        # teacher_outputs = torch.cat(teacher_outputs, dim=0)
+        final_teacher = {key: [] for key in teacher_outputs[0].keys()}
+        for output in teacher_outputs:
+            for key, value in output.items():
+                final_teacher[key].append(value)
+
+        del teacher_outputs
+        final_teacher = [{key: torch.cat(value) for key, value in final_teacher.items()}]
+
         outputs = self.model(batch['input'], pre_img, pre_hm, pre_hm_hp)
 
-        loss, loss_stats, choice_list = self.loss(teacher_outputs, outputs, batch, phase)
+        loss, loss_stats, choice_list = self.loss(final_teacher, outputs, batch, phase)
         return outputs[-1], loss, loss_stats, choice_list
 
 
 class KDLoss(torch.nn.Module):
     def __init__(self, opt):
+
+        # hm: object center heatmap
+        # wh: 2D bounding box size
+        # hps/hp: keypoint displacements
+        # reg/off: sub-pixel offset for object center
+        # hm_hp: keypoint heatmaps
+        # hp_offset: sub-pixel offsets for keypoints
+        # scale/obj_scale: relative cuboid dimensions
+
         super(KDLoss, self).__init__()
         self.crit = torch.nn.MSELoss()
+        self.crit_reg = torch.nn.L1Loss(reduction='sum')
+        self.crit_wh = torch.nn.L1Loss(reduction='sum')
         self.opt = opt
-
+        self.extra_conv = ExtraConv()
         self.loss_names = [
             'hm_loss', 'wh_loss', 'hp_loss', 'off_loss', 'hm_hp_loss', 'hp_offset_loss', 'obj_scale_loss',
             'tracking_loss', 'tracking_hp_loss'
         ]
 
-    def pad_teacher_hm(self, hm, batch):
-        size = list(hm.size())
-        size[1] = len(MODELS_TRAIN)
+    def get_model_hm(self, model_hm, teacher_hm, batch):
+        size = list(teacher_hm.size())
         ## TODO: batch                                     here
-        cls_idx = MODELS_TRAIN.index(batch['meta']['class'][0])
-        zeros = torch.zeros(size, dtype=hm.dtype, layout=hm.layout, device=hm.device)
-        zeros[:, cls_idx] = hm[:, 0]
-        return zeros
+        new_model_hm = torch.zeros(size, dtype=teacher_hm.dtype, layout=teacher_hm.layout, device=teacher_hm.device)
+        for batch_id in range(size[0]):
+            cls_idx = MODELS_TRAIN.index(batch['meta']['class'][batch_id])
+            new_model_hm[batch_id, 0] = model_hm[batch_id, cls_idx]
+        return new_model_hm
 
     def forward(self, teacher_outputs, outputs, batch, phase):
+
+        teacher_outputs = self.extra_conv(teacher_outputs)
+        outputs = self.extra_conv(outputs)
 
         ret = {n: 0 for n in self.loss_names}
 
         for idx in range(self.opt.num_stacks):
             model_output = outputs[idx]
             teacher_output = teacher_outputs[idx]
+            # teacher_hm = self.pad_teacher_hm(teacher_output['hm'], batch)
 
-            teacher_hm = self.pad_teacher_hm(teacher_output['hm'], batch)
-            ret['hm_loss'] = self.crit(model_output['hm'], teacher_hm)
+            # mask for center heatmap
+            hm_mask = _nms(teacher_output['mask_hm'])
+            hm_mask = torch.max(hm_mask, dim=1, keepdim=True).values
+            hm_mask_weight = hm_mask.sum() + 1e-4
+            hm_mask = hm_mask.bool().float()
 
-            ret['wh_loss'] = self.crit(model_output['wh'], teacher_output['wh'])
-            ret['hp_loss'] = self.crit(model_output['hps'], teacher_output['hps'])
-            ret['off_loss'] = self.crit(model_output['reg'], teacher_output['reg'])
-            ret['hm_hp_loss'] = self.crit(model_output['hm_hp'], teacher_output['hm_hp'])
-            ret['hp_offset_loss'] = self.crit(model_output['hp_offset'], teacher_output['hp_offset'])
-            ret['obj_scale_loss'] = self.crit(model_output['scale'], teacher_output['scale'])
+            # mask for keypoints heatmap
+            hp_mask = _nms(teacher_output['mask_hm_hp'])
+            hp_mask = hp_mask.sum(dim=1, keepdim=True)
+            hp_mask_weight = hp_mask.sum() + 1e-4
+
+            # scale wh and whl params
+            norm_wh = torch.sum(teacher_output['wh'], dim=1, keepdim=True) / 2. + 1e-4
+            norm_scale = torch.sum(teacher_output['scale'], dim=1, keepdim=True) / 3. + 1e-4
+            # norm_kps = torch.sum(teacher_output['hps'], dim=1, keepdim=True) / 16. + 1e-4
+
+            # KD for 2d box params
+            model_hm = self.get_model_hm(model_output['hm'], teacher_output['hm'], batch)
+            ret['hm_loss'] += self.crit(model_hm, teacher_output['hm'])
+
+            ret['wh_loss'] += \
+                self.crit_wh((model_output['wh'] * hm_mask) / norm_wh, (teacher_output['wh'] * hm_mask) / norm_wh) / hm_mask_weight
+
+            ret['off_loss'] += \
+                self.crit_reg(model_output['reg'] * hm_mask, teacher_output['reg'] * hm_mask) / hm_mask_weight
+
+            # KD for 3D box params
+            ret['obj_scale_loss'] += self.crit_wh(
+                (model_output['scale'] * hm_mask) / norm_scale,
+                (teacher_output['scale'] * hm_mask) / norm_scale,
+            ) / hm_mask_weight
+
+            ret['hm_hp_loss'] += self.crit(model_output['hm_hp'], teacher_output['hm_hp'])
+
+            ret['hp_offset_loss'] += self.crit_reg(
+                model_output['hp_offset'] * hp_mask, teacher_output['hp_offset'] * hp_mask
+            ) / hp_mask_weight
+
+            # keypoints displacenet from object center
+            displacement_loss = torch.abs(model_output['hps'] * hm_mask - teacher_output['hps'] * hm_mask).sum()
+            displacement_loss = displacement_loss / hp_mask_weight
+            ret['hp_loss'] += displacement_loss.mean()
+
+
+            # # ret['hm_loss'] = self.crit(model_output['hm'], teacher_hm)
+            # # ret['wh_loss'] = self.crit(model_output['wh'], teacher_output['wh'])
+            # # ret['hp_loss'] = self.crit(model_output['hps'], teacher_output['hps'])
+            # # ret['off_loss'] = self.crit(model_output['reg'], teacher_output['reg'])
+            # # ret['hm_hp_loss'] = self.crit(model_output['hm_hp'], teacher_output['hm_hp'])
+            # # ret['hp_offset_loss'] = self.crit(model_output['hp_offset'], teacher_output['hp_offset'])
+            # # ret['obj_scale_loss'] = self.crit(model_output['scale'], teacher_output['scale'])
+
+        ret['hm_loss'] = ret['hm_loss'] * self.opt.hm_weight
+        ret['wh_loss'] = ret['wh_loss'] * self.opt.wh_weight
+        ret['off_loss'] = ret['off_loss'] * self.opt.off_weight
+        ret['obj_scale_loss'] = ret['obj_scale_loss'] * self.opt.obj_scale_weight
+        ret['hm_hp_loss'] = ret['hm_hp_loss'] * self.opt.hm_hp_weight
+        ret['hp_offset_loss'] = ret['hp_offset_loss'] * self.opt.off_weight
+        ret['hp_loss'] = ret['hp_loss'] * self.opt.hp_weight
 
         loss = 0
 
@@ -286,7 +396,9 @@ class KDTrainer(BaseTrainer):
             img = np.clip(((
                                    img * opt.std + opt.mean) * 255.), 0, 255).astype(np.uint8)
 
-            pred = debugger.gen_colormap(output['hm'][i].detach().cpu().numpy())
+            cls_id = MODELS_TRAIN.index(batch['meta']['class'][i])
+            pred_hm = output['hm'][i][cls_id: cls_id+1].sigmoid()
+            pred = debugger.gen_colormap(pred_hm.detach().cpu().numpy())
             gt = debugger.gen_colormap(batch['hm'][i][choice_list[i]].detach().cpu().numpy())
             debugger.add_blend_img(img, pred, 'out_hm_pred')
             debugger.add_blend_img(img, gt, 'out_hm_gt')
@@ -350,7 +462,7 @@ class KDTrainer(BaseTrainer):
                                 img_id='pre_hmhp', c=(0, 0, 255))  # red
 
             if opt.hm_hp:
-                pred = debugger.gen_colormap_hp(output['hm_hp'][i].detach().cpu().numpy())
+                pred = debugger.gen_colormap_hp(output['hm_hp'][i].sigmoid().detach().cpu().numpy())
                 debugger.add_blend_img(img, pred, 'out_hmhp_pred')
 
             # Ground truth

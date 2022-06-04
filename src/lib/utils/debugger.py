@@ -7,7 +7,12 @@ import cv2
 import os
 import math
 
-MODELS_TRAIN = ["bike", "laptop", "camera"]
+MODELS_TRAIN = [
+    "bike",
+    "laptop",
+    # "camera"
+]
+
 
 class Debugger(object):
     def __init__(self, ipynb=False, theme='black',

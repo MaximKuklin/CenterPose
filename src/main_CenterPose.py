@@ -133,12 +133,12 @@ if __name__ == '__main__':
     opt.exp_id = f'objectron_{opt.c}_{opt.arch}'
     opt.num_epochs = 140
     opt.val_intervals = 5
-    opt.lr_step = '90,120'
-    opt.batch_size = 1
-    opt.lr = 6e-5
-    opt.gpus = '0'
-    opt.num_workers = 4
-    opt.print_iter = 5
+    opt.lr_step = '90'
+    opt.batch_size = 4
+    opt.lr = 1e-4
+    opt.gpus = '1'
+    opt.num_workers = 16
+    opt.print_iter = 100
     opt.debug = 5
     opt.save_all = True
 

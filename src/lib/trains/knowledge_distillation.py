@@ -60,7 +60,7 @@ class ExtraConv(nn.Module):
         output['hps'] = _input['hps']
         output['reg'] = _input['reg']
         output['hm_hp'] = self.leakyrelu(_input['hm_hp'])
-        output['mask_hm_hp'] = self.relu(_input['hm_hp'])
+        output['mask_hm_hp'] = self.leakyrelu(_input['hm_hp'])
         output['hp_offset'] = _input['hp_offset']
         output['scale'] = _input['scale']
 
@@ -132,6 +132,16 @@ class KDLoss(torch.nn.Module):
             new_model_hm[batch_id, 0] = model_hm[batch_id, cls_idx]
         return new_model_hm
 
+    def get_teacher_hm_hp(self, teacher_hm_hp, model_hm_hp):
+        batch, kp_num = teacher_hm_hp.size()[:2]
+        maximums = torch.max(teacher_hm_hp.view(batch, kp_num, -1), dim=-1).values
+        mask = (maximums > 0.1).float()[:, :, None, None]
+
+        teacher_hm_hp = teacher_hm_hp * mask
+        model_hm_hp = model_hm_hp * mask
+
+        return teacher_hm_hp, model_hm_hp
+
     def forward(self, teacher_outputs, outputs, batch, phase):
 
         teacher_outputs = self.extra_conv(teacher_outputs)
@@ -151,7 +161,8 @@ class KDLoss(torch.nn.Module):
             hm_mask = hm_mask.bool().float()
 
             # mask for keypoints heatmap
-            hp_mask = _nms(teacher_output['mask_hm_hp'])
+            teacher_output['hm_hp'] = teacher_output['hm_hp'] - teacher_output['hm_hp'].min()
+            hp_mask = _nms(teacher_output['hm_hp'])
             hp_mask = hp_mask.sum(dim=1, keepdim=True)
             hp_mask_weight = hp_mask.sum() + 1e-4
 
@@ -176,6 +187,7 @@ class KDLoss(torch.nn.Module):
                 (teacher_output['scale'] * hm_mask) / norm_scale,
             ) / hm_mask_weight
 
+            # teacher_hm_hp, model_hm_hp = self.get_teacher_hm_hp(teacher_output['hm_hp'], model_output['hm_hp'])
             ret['hm_hp_loss'] += self.crit(model_output['hm_hp'], teacher_output['hm_hp'])
 
             ret['hp_offset_loss'] += self.crit_reg(

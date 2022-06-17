@@ -1781,7 +1781,7 @@ if __name__ == '__main__':
 
     else:
         opt_eval.report_file = f'{opt_detector.c}_report_{opt_eval.eval_confidence_thresh}.txt'
-        opt_detector.load_model = f"../../../models/CenterPose/{opt_detector.c}_140.pth"
+        opt_detector.load_model = f"models/CenterPose/{opt_detector.c}_140.pth"
 
         if opt_detector.tracking_task == True:
             opt_detector.load_model = f"../../../models/CenterPoseTrack/{opt_detector.c}_15.pth"

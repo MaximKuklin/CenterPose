@@ -731,7 +731,7 @@ class Evaluator(object):
         BACK_BOTTOM_LEFT = 1
         up_vector = box_point_3d[BACK_TOP_LEFT] - box_point_3d[BACK_BOTTOM_LEFT]
         rot_vec = angle * up_vector / np.linalg.norm(up_vector)
-        rotation = rotation_util.from_rotvec(rot_vec).as_dcm()
+        rotation = rotation_util.from_rotvec(rot_vec).as_matrix()
         box_center = box_point_3d[CENTER]
         box_point_3d_rotated = np.matmul((box_point_3d - box_center), rotation) + box_center
         return box_point_3d_rotated
@@ -1250,7 +1250,7 @@ if __name__ == '__main__':
     # opt_eval.eval_skip=35 # Run images on [eval_skip, eval_max_num]
     # opt_detector.batch_size=1
     # opt_eval.eval_debug = True # Whether to save img for debug
-    opt_eval.eval_debug_json = True  # Whether to save json for debug
+    # opt_eval.eval_debug_json = True  # Whether to save json for debug
     opt_eval.eval_debug_clean = True
 
     opt_detector.debug = 0  # do not save extra visualization in demo/ for debug, e.g., heatmap
@@ -1271,10 +1271,10 @@ if __name__ == '__main__':
     # No symmetry
     if 'v1' in opt_detector.arch:
         opt_eval.report_file = f'{opt_detector.c}_v1_report_{opt_eval.eval_confidence_thresh}.txt'
-        opt_detector.load_model = f"../../../models/CenterPose/{opt_detector.c}_v1_{opt_eval.eval_weight_id}.pth"
+        opt_detector.load_model = f"models/CenterPose/{opt_detector.c}_v1_{opt_eval.eval_weight_id}.pth"
     else:
         opt_eval.report_file = f'{opt_detector.c}_report_{opt_eval.eval_confidence_thresh}.txt'
-        opt_detector.load_model = f"../../../models/CenterPose/{opt_detector.c}_{opt_eval.eval_weight_id}.pth"
+        opt_detector.load_model = f"models/CenterPose/{opt_detector.c}_{opt_eval.eval_weight_id}.pth"
 
     # Symmetry exists, just bottle while cup has been hard-coded
     if opt_detector.c == 'bottle':

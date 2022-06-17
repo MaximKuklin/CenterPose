@@ -191,7 +191,7 @@ class ObjectPoseDataset(data.Dataset):
                             # Save img_path, video_id, frame_id, json_path
                             video_id = os.path.split(os.path.split(imgpath)[0])[1]
                             frame_id = os.path.splitext(os.path.basename(imgpath))[0]
-                            class_name = video_id.split('_')[0]
+                            class_name = video_id.split('_')[0] if "cereal_box" not in video_id else "_".join(video_id.split('_')[:2])
                             imgs.append((imgpath, video_id, frame_id,
                                          imgpath.replace(ext, "json"), class_name))
 
@@ -215,8 +215,9 @@ class ObjectPoseDataset(data.Dataset):
             return imgs
 
         self.images = []
-        print(self.img_dir)
-        self.images += load_data(self.img_dir, extensions=["png", 'jpg'])
+        print(self.img_dirs)
+        for img_dir in self.img_dirs:
+            self.images += load_data(img_dir, extensions=["png", 'jpg'])
         self.num_samples = len(self.images)
         print('Loaded {} {} samples'.format(split, self.num_samples))
 

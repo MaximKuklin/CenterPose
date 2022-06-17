@@ -436,7 +436,7 @@ class opts(object):
         default_dataset_info = {
             'object_pose': {
                 'default_resolution': [512, 512],
-                'num_classes': 1,
+                'num_classes': 3,
                 'mean': [0.408, 0.447, 0.470],
                 'std': [0.289, 0.274, 0.278],
                 'dataset': 'objectron',

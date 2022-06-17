@@ -39,10 +39,14 @@ def main(opt):
     print('Creating model...')
     model = create_model(opt.arch, opt.heads, opt.head_conv, opt=opt)
     optimizer = torch.optim.Adam(model.parameters(), opt.lr)
-    start_epoch = 0
+    # start_epoch = 0
     if opt.load_model != '':
         model, optimizer, start_epoch = load_model(
             model, opt.load_model, optimizer, opt.resume, opt.lr, opt.lr_step)
+
+    # TODO: this is done because there's no option not to load epoch and optimizer
+    start_epoch = 0
+    optimizer = torch.optim.Adam(model.parameters(), opt.lr)
 
     Trainer = train_factory[opt.task]
     trainer = Trainer(opt, model, optimizer)

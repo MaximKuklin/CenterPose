@@ -4,6 +4,7 @@ import math
 import numpy as np
 import tensorflow as tf
 import cv2
+import os 
 
 import objectron.schema.features as features
 
@@ -20,6 +21,8 @@ LABEL_INSTANCE_MugFlag = 'MugFlag_instance'  # Only for cup category
 LABEL_INSTANCE_Image_ID = 'image_id'
 
 VISIBILITY = 'visibility'
+
+os.chdir("./src/tools/objectron_eval")
 
 # Read three label lists
 cup_list = []
@@ -53,6 +56,7 @@ M = np.identity(3)
 M[0, 0] = -1
 M[2, 2] = -1
 
+os.chdir("../../..")
 
 class ObjectronParser(object):
     """Parser using NumPy."""

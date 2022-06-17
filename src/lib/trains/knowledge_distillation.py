@@ -123,14 +123,15 @@ class KDLoss(torch.nn.Module):
             'tracking_loss', 'tracking_hp_loss'
         ]
 
-    def get_model_hm(self, model_hm, teacher_hm, batch):
+    def pad_teacher_hm(self, teacher_hm, batch):
         size = list(teacher_hm.size())
+        size[1] = len(MODELS_TRAIN)
         ## TODO: batch                                     here
-        new_model_hm = torch.zeros(size, dtype=teacher_hm.dtype, layout=teacher_hm.layout, device=teacher_hm.device)
+        new_teacher_hm = torch.zeros(size, dtype=teacher_hm.dtype, layout=teacher_hm.layout, device=teacher_hm.device)
         for batch_id in range(size[0]):
             cls_idx = MODELS_TRAIN.index(batch['meta']['class'][batch_id])
-            new_model_hm[batch_id, 0] = model_hm[batch_id, cls_idx]
-        return new_model_hm
+            new_teacher_hm[batch_id, cls_idx] = teacher_hm[batch_id, 0]
+        return new_teacher_hm
 
     def get_teacher_hm_hp(self, teacher_hm_hp, model_hm_hp):
         batch, kp_num = teacher_hm_hp.size()[:2]
@@ -152,7 +153,7 @@ class KDLoss(torch.nn.Module):
         for idx in range(self.opt.num_stacks):
             model_output = outputs[idx]
             teacher_output = teacher_outputs[idx]
-            # teacher_hm = self.pad_teacher_hm(teacher_output['hm'], batch)
+            teacher_hm = self.pad_teacher_hm(teacher_output['hm'], batch)
 
             # mask for center heatmap
             hm_mask = _nms(teacher_output['mask_hm'])
@@ -172,8 +173,8 @@ class KDLoss(torch.nn.Module):
             # norm_kps = torch.sum(teacher_output['hps'], dim=1, keepdim=True) / 16. + 1e-4
 
             # KD for 2d box params
-            model_hm = self.get_model_hm(model_output['hm'], teacher_output['hm'], batch)
-            ret['hm_loss'] += self.crit(model_hm, teacher_output['hm'])
+            # model_hm = self.get_model_hm(model_output['hm'], teacher_output['hm'], batch)
+            ret['hm_loss'] += self.crit(model_output['hm'], teacher_hm)
 
             ret['wh_loss'] += \
                 self.crit_wh((model_output['wh'] * hm_mask) / norm_wh, (teacher_output['wh'] * hm_mask) / norm_wh) / hm_mask_weight
